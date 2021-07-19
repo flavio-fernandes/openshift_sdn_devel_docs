@@ -41,24 +41,30 @@ sudo apt-get install ovn-host ovn-common -y
 Install a few pre-requisite packages.
 
 ```
-apt-get update
-apt-get install -y build-essential fakeroot debhelper \
-                    autoconf automake libssl-dev \
-                    openssl python-all \
-                    python-setuptools \
-                    python-six \
-                    libtool git dh-autoreconf \
-                    linux-headers-$(uname -r)
+sudo apt-get update
+sudo apt-get install -y build-essential fakeroot debhelper \
+                        autoconf automake libssl-dev \
+                        openssl python-all \
+                        python-setuptools \
+                        python-six \
+                        libtool git dh-autoreconf \
+                        linux-headers-$(uname -r)
 ```
 
-Clone the OVS repo.
+Clone the OVN repo.
+**Note:** Starting on OVN [version v21.03.0](https://github.com/ovn-org/ovn/commit/9ea1f092d2ed6b90bc8c444a2c73f4e0fceebeff),
+it is recommended to obtain the compatible OVS via git submodule, as shown below.
 
 ```
-git clone https://github.com/openvswitch/ovs.git
-cd ovs
+git clone https://github.com/ovn-org/ovn.git
+cd ovn
+
+# not recommended option: git clone https://github.com/openvswitch/ovs.git
+git submodule update --init  ; # recommended option
+pushd ./ovs
 ```
 
-Configure and compile the sources
+Configure and compile the OVS sources.
 
 ```
 ./boot.sh
@@ -66,18 +72,18 @@ Configure and compile the sources
 make -j3
 ```
 
-Install the executables
+Install the OVS executables.
 
 ```
-make install
-make modules_install
+sudo make install
+sudo make modules_install
 ```
 
 Create a depmod.d file to use OVS kernel modules from this repo instead of
 upstream linux.
 
 ```
-cat > /etc/depmod.d/openvswitch.conf << EOF
+cat << EOF | sudo tee /etc/depmod.d/openvswitch.conf
 override openvswitch * extra
 override vport-geneve * extra
 override vport-stt * extra
@@ -85,10 +91,43 @@ override vport-* * extra
 EOF
 ```
 
-Copy a startup script and start OVS
+Copy a startup script and start OVS.
 
 ```
-depmod -a
-cp debian/openvswitch-switch.init /etc/init.d/openvswitch-switch
-/etc/init.d/openvswitch-switch force-reload-kmod
+sudo depmod -a
+sudo cp debian/openvswitch-switch.init /etc/init.d/openvswitch-switch
+sudo /etc/init.d/openvswitch-switch force-reload-kmod
+```
+
+Configure and compile the OVN sources.
+
+```
+popd  ; # back to ovn directory
+./boot.sh
+./configure --prefix=/usr --localstatedir=/var  --sysconfdir=/etc --enable-ssl --with-ovs-source=${PWD}/ovs
+make -j3
+```
+
+Install the OVN executables.
+
+```
+sudo make install
+```
+
+Copy startup scripts and start OVN.
+
+```
+sudo cp -v ./debian/ovn-central.init /etc/init.d/ovn-central
+sudo cp -v ./debian/ovn-host.init /etc/init.d/ovn-host
+sudo ln -s /usr/share/openvswitch/scripts/ovs-lib /usr/share/ovn/scripts/
+
+# Reference commands for starting central and host locally
+sudo /etc/init.d/ovn-central start
+sudo /etc/init.d/ovn-host start
+
+sudo ovn-nbctl set-connection ptcp:6641
+sudo ovn-sbctl set-connection ptcp:6642
+sudo ovs-vsctl set open . external_ids:system-id=chassis1 \
+     external_ids:ovn-remote=tcp:127.0.0.1:6642 \
+     external_ids:ovn-encap-type=geneve external_ids:ovn-encap-ip=127.0.0.1
 ```
